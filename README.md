@@ -1,3 +1,7 @@
 # TFM
-# En este directorio encontramos los archivos necesarios para replicar la primera parte del TFM
-Un script de R con anotaciones, los dos excles con la presencia del insecto y dentro de la carpeta Excel encontramos el resutlado obtenido por Qgis de las 19 variables climaticas.
+# En este directorio encontramos los archivos necesarios para replicar el TFM
+## Distribución
+Los archivos estan repartidos en diferntes carpetas:
+- Script: Contiene el script ordenado y con anotaciones para que sea rapido y fluido replicar los resultados.
+- Excels: Contiene las bases de datos creadas que he utilizado para el trabajo, tanto las crudas como las que he ido obteniendo al aplicar el script.
+- QGis: Contiene los archivos que he utilizado para generar las coordenas en el QGis, concretamente los .TIF descargados de WorldClim.
