@@ -1,16 +1,21 @@
 # paquetes
 library(readxl)
-library(purrr) #para la función reduce (juntar los excel qgis)
+library(purrr)
 library(writexl)
+library(raster)
 library(dplyr)
 library(ggplot2)
 library(moments)
 library(nortest)
-library(FactoMineR) # para ACP
+library(FactoMineR) 
 library(factoextra)
-library(raster)
 library(biomod2)
-library(randomForest)
+library(tidyr)
+library(gridExtra)
+library(inspectdf)
+library(DataExplorer)
+
+
 
 # Define la ruta del archivo CSV
 ruta_archivo <- "C:/Users/smoya/Desktop/gbif.csv"
@@ -44,9 +49,12 @@ write_xlsx(data_modificado, "datos_modificados_excel.xlsx")
 head(data_modificado)
 getwd()
 
-####### Parte 2######
+#----------------------------------------------------------------------------
+###### EDA ######
+#----------------------------------------------------------------------------
+
 # cargamos la información del QGIS
-base_datos<- read_excel("C:/Users/sergio/Desktop/excels/bio_qgis/ES/resultado_combinado.xlsx")
+base_datos<- read_excel("C:/Users/smoya/Desktop/TFM/bio_qgis/ES/resultado_combinado.xlsx")
 # Pequeña visualizacion
 head(base_datos)
 # Una vez combinado todo procedemos con el EDA
@@ -64,6 +72,9 @@ base_datos <- base_datos[, !names(base_datos) %in% elm_biosum]
 # creamos un nuevo data frame con las variables a analizar exlcuyendo el id y las coordenadas y otr informacion georreferenciada
 columnas_a_excluir <- c("id", "left", "top", "right", "bottom", "centro_x", "centro_y", "row_index", "col_index")
 base_datos_analisis <- base_datos %>% select(-all_of(columnas_a_excluir))
+
+# Reporte completo de EDA con visualizaciones automáticas
+create_report(base_datos_analisis, output_file = "eda_reporte.html")
 
 #resumen estadistico
 resumen <- base_datos_analisis %>%
@@ -97,7 +108,22 @@ resumen_largo <- resumen %>%
 # Ver resultado
 print(resumen)
 
-# Crear la tabla con el número de puntos y la cantidad de veces que aparece
+library(inspectdf)
+df_simple <- as.data.frame(base_datos_analisis)
+
+inspect_types(df_simple) %>%
+  plot() +
+  labs(title = "Figura 15. Tipos de Variables (Discretas vs Continuas)")
+# Tipos de columnas (todas deberían ser continuas en este caso)
+inspect_types(base_datos_analisis) %>%
+  plot() +
+  labs(title = "Figura 15. Tipos de Variables (Discretas vs Continuas)")
+
+inspect_types(df_simple) -> tipos_df
+plot_inspect(tipos_df) +
+  labs(title = "Figura 15. Tipos de Variables (Discretas vs Continuas)")
+
+# Crear la tabla base_datos# Crear la tabla con el número de puntos y la cantidad de veces que aparece
 tabla_frecuencia <- as.data.frame(table(base_datos_analisis$numero_puntos_total))
 colnames(tabla_frecuencia) <- c("numero_puntos_total", "frecuencia")
 
@@ -107,9 +133,44 @@ tabla_frecuencia <- tabla_frecuencia[tabla_frecuencia$frecuencia > 0, ]
 # Mostrar la tabla
 print(tabla_frecuencia)
 
+
+ggplot(base_datos_grupo, aes(x = as.factor(numero_puntos_total))) +
+  geom_bar(fill = "steelblue", color = "black") +
+  labs(title = "Frecuencia de numero_puntos_total",
+       x = "Número de puntos (presencia)",
+       y = "Frecuencia") +
+  theme_minimal()
+
+# Gráfico de barras con frecuencia sobre las barras
+ggplot(base_datos_grupo, aes(x = categoria_puntos)) +
+  geom_bar(fill = "steelblue", color = "black", width = 0.7) +
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5) +  # Añadir texto sobre las barras
+  labs(title = "Frecuencia de Categorías de Número de Puntos",
+       x = "Categoría de Número de Puntos",
+       y = "Frecuencia") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Seleccionar solo las variables deseadas
+variables_seleccionadas <- base_datos_analisis %>%
+  select(bio9mean, bio13mean, bio12mean, bio4mean)
+
+# Convertir a formato largo
+variables_largo <- variables_seleccionadas %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Valor")
+
+# Graficar histogramas
+ggplot(variables_largo, aes(x = Valor)) +
+  geom_histogram(bins = 30, fill = "darkcyan", color = "white") +
+  facet_wrap(~Variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Histogramas de bio9, bio13, bio12 y bio4")
+
+
 # Definir grupos de variables (puedes ajustar esto según las variables de tu base de datos)
 temperatura_variables <- c("bio1mean", "bio2mean", "bio3mean", "bio4mean", "bio5mean","bio6mean","bio7mean", "bio8mean","bio9mean","bio10mean","bio11mean")  
 precipitacion_variables <- c("bio12mean", "bio13mean", "bio14mean","bio15mean" , "bio16mean", "bio17mean","bio18mean","bio19mean")  
+
 
 # Histograma para las variables de temperatura
 histograms_temp <- list()
@@ -208,21 +269,63 @@ base_datos_grupo$categoria_puntos <- factor(base_datos_grupo$categoria_puntos,
 
 boxplot_grupo <- list()
 
-# Crear boxplots para cada variable numérica vs categoria_puntos en 'base_datos_grupo'
-for (col in names(base_datos_grupo)) {
-  if (col != "numero_puntos_total" && col != "categoria_puntos" && is.numeric(base_datos_grupo[[col]])) {  
-    plot <- ggplot(base_datos_grupo, aes(x = categoria_puntos, y = .data[[col]])) +
-      geom_boxplot(fill = "lightblue", color = "black", alpha = 0.7) +
-      labs(title = paste("Boxplot de", col, "vs Categoría de Número de Puntos"),
-           x = "Categoría de Número de Puntos", y = col) +
-      theme_minimal()
-    
-    boxplot_grupo[[col]] <- plot
-  }
+# Definir las variables de temperatura y precipitación (ajusta según tus nombres)
+variables_temperatura <- grep("^bio[1-9]mean$", names(base_datos_grupo), value = TRUE)  # Variables de temperatura
+variables_precipitacion <- grep("^bio[10-19]mean$", names(base_datos_grupo), value = TRUE)  # Variables de precipitación
+# Definir las variables que deseas graficar
+variables_deseadas <- c("bio12mean", "bio13mean", "bio4mean", "bio8mean")
+
+# Filtrar las variables que realmente están presentes en tu dataset
+variables_seleccionadas_boxplot <- intersect(variables_deseadas, names(base_datos_grupo))
+
+# Crear listas vacías para los gráficos de temperatura y precipitación
+boxplot_grupo_temp <- list()
+boxplot_grupo_prec <- list()
+boxplot_grupo_selec <- list()
+
+
+# Crear boxplots para las variables de temperatura vs categoria_puntos
+for (col in variables_temperatura) {
+  plot <- ggplot(base_datos_grupo, aes(x = categoria_puntos, y = .data[[col]])) +
+    geom_boxplot(fill = "lightblue", color = "black", alpha = 0.7) +
+    labs(title = paste("Boxplot de", col, "vs Categoría de Número de Puntos"),
+         x = "Categoría de Número de Puntos", y = col) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Mejora la legibilidad
+  boxplot_grupo_temp[[col]] <- plot
 }
 
-# Mostrar todos los boxplots juntos
-do.call(grid.arrange, c(boxplot_grupo, ncol = 2))
+# Crear boxplots para las variables de precipitación vs categoria_puntos
+for (col in precipitacion_variables) {
+  plot <- ggplot(base_datos_grupo, aes(x = categoria_puntos, y = .data[[col]])) +
+    geom_boxplot(fill = "lightgreen", color = "black", alpha = 0.7) +
+    labs(title = paste("Boxplot de", col, "vs Categoría de Número de Puntos"),
+         x = "Categoría de Número de Puntos", y = col) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Mejora la legibilidad
+  boxplot_grupo_prec[[col]] <- plot
+}
+
+# Crear boxplots para las variables seleccionadas vs categoria_puntos
+for (col in variables_seleccionadas_boxplot) {
+  plot <- ggplot(base_datos_grupo, aes(x = categoria_puntos, y = .data[[col]])) +
+    geom_boxplot(fill = "lightblue", color = "black", alpha = 0.7) +
+    labs(title = paste("Boxplot de", col, "vs Categoría de Número de Puntos"),
+         x = "Categoría de Número de Puntos", y = col) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Mejora la legibilidad
+  boxplot_grupo_selec[[col]] <- plot
+}
+
+
+# Mostrar todos los boxplots de temperatura juntos
+do.call(grid.arrange, c(boxplot_grupo_temp, ncol = 2))
+
+# Mostrar todos los boxplots de precipitación juntos
+do.call(grid.arrange, c(boxplot_grupo_prec, ncol = 2))
+
+# Mostrar todos los boxplots de temperatura juntos
+do.call(grid.arrange, c(boxplot_grupo_selec, ncol = 2))
 
 # Instalar y cargar el paquete necesario
 if (!require(nortest)) {
@@ -287,6 +390,13 @@ corrplot.mixed(correlaciones,
 library(olsrr)
 modelo_vif <- lm(y ~ ., data = base_datos_analisis[, -1])
 ols_vif_tol(modelo_vif)
+
+# Crear un gráfico de barras de los VIF
+ggplot(vif_tabla, aes(x = reorder(Variable, VIF), y = VIF)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  coord_flip() +  # Para voltear las barras y hacer que los nombres de las variables sean legibles
+  labs(title = "Gráfico de VIF para Variables del Modelo", x = "Variable", y = "VIF") +
+  theme_minimal()
 
 #--------------------------------------------------------------
 # Analsis de componentes principales
@@ -376,10 +486,10 @@ datos_combinados_spp126 <- lista_qgist %>%
 head(datos_combinados_spp126)
 
 #Guardo el excel y hago las columnas de coordenas x e y
-write_xlsx(datos_combinados_spp126, "C:/Users/sergio/Desktop/TFM/bio_qgis/resultado_combinado_ssp126.xlsx")
+write_xlsx(datos_combinados_spp126, "C:/Users/smoya/Desktop/TFM/bio_qgis/resultado_combinado_ssp126.xlsx")
 
 # Cargo archivo y escalo los datos
-datos_126<-read_excel("C:/Users/sergio/Desktop/excels/bio_qgis/resultado_combinado_ssp126.xlsx")
+datos_126<-read_excel("C:/Users/smoya/Desktop/TFM/bio_qgis/resultado_combinado_ssp126.xlsx")
 
 datos_126_acp<- datos_126 %>% select(-id,-left,-top,-right,-bottom,-centro_x,-centro_y,-row_index,-col_index,-NUMPOINTS)
 
@@ -423,7 +533,7 @@ head(datos_combinados_spp245)
 write_xlsx(datos_combinados_spp245, "C:/Users/smoya/Desktop/TFM/bio_qgis/resultado_combinado_ssp245.xlsx")
 
 # Cargo archivo y escalo los datos
-datos_245<-read_excel("C:/Users/sergio/Desktop/excels/bio_qgis/resultado_combinado_ssp245.xlsx")
+datos_245<-read_excel("C:/Users/smoya/Desktop/TFM/bio_qgis/resultado_combinado_ssp245.xlsx")
 
 datos_245_acp<- datos_245 %>% select(-id,-left,-top,-right,-bottom,-centro_x,-centro_y,-row_index,-col_index,-NUMPOINTS)
 
@@ -468,7 +578,7 @@ head(datos_combinados_spp370)
 write_xlsx(datos_combinados_spp370, "C:/Users/smoya/Desktop/TFM/bio_qgis/resultado_combinado_ssp370.xlsx")
 
 # Cargo archivo y escalo los datos
-datos_370<-read_excel("C:/Users/sergio/Desktop/excels/bio_qgis/resultado_combinado_ssp370.xlsx")
+datos_370<-read_excel("C:/Users/smoya/Desktop/TFM/bio_qgis/resultado_combinado_ssp370.xlsx")
 
 datos_370_acp<- datos_370 %>% select(-id,-left,-top,-right,-bottom,-centro_x,-centro_y,-row_index,-col_index,-NUMPOINTS)
 
@@ -512,7 +622,7 @@ head(datos_combinados_spp548)
 write_xlsx(datos_combinados_spp548, "C:/Users/smoya/Desktop/TFM/bio_qgis/resultado_combinado_ssp548.xlsx")
 
 # Cargo archivo y escalo los datos
-datos_548<-read_excel("C:/Users/sergio/Desktop/excels/bio_qgis/resultado_combinado_ssp548.xlsx")
+datos_548<-read_excel("C:/Users/smoya/Desktop/TFM/bio_qgis/resultado_combinado_ssp548.xlsx")
 
 datos_548_acp<- datos_548 %>% select(-id,-left,-top,-right,-bottom,-centro_x,-centro_y,-row_index,-col_index,-NUMPOINTS)
 
@@ -541,7 +651,6 @@ pc_futuros_548 <- na.omit(pc_futuros_548)
 # 1. Formateo de datos para biomod2
 # -------------------------------
 
-# Paso 1: Formateo de datos
 Biomod_presente <- BIOMOD_FormatingData(
   resp.var = pc_data$presence,
   expl.var = pc_data[, 1:4],  # Dim.1-Dim.4 de la PCA
@@ -549,25 +658,21 @@ Biomod_presente <- BIOMOD_FormatingData(
   resp.name = "H. halys"
 )
 
+# -------------------------------
+# 2. Configuración y entrenamiento de modelos
+# -------------------------------
 
-# Definir las opciones de modelado
-myOptions <- bm_ModelingOptions(
-  data.type = "binary", # Tipo de dato binario (presencia/ausencia)
-  strategy = "default", # Estrategia por defecto
-  models = c("GLM", "RF", "GBM")
-)
-
-# Ejecutar el modelado
 Biomod_model_presente <- BIOMOD_Modeling(
-  bm.format = Biomod_presente, # Los datos formateados
-  models = c("GLM", "RF", "GBM"), # Modelos a utilizar
-  bm.options = myOptions, # Opciones del modelo
-  nb.rep = 3, # Número de repeticiones
-  data.split.perc = 70, # 70% para entrenamiento
-  var.import = 3, # Número de repeticiones para la importancia de variables
-  metric.eval = c('TSS', 'ROC'), # Métodos de evaluación
-  scale.models = TRUE, # Reescalar todos los modelos
-  do.full.models = FALSE # No realizar el modelo completo
+  Biomod_presente,
+  models = c('GLM', 'RF', 'GBM'), 
+  models.options = BIOMOD_ModelingOptions(),
+  NbRunEval = 3,              # Repeticiones
+  DataSplit = 70,             # 70% entrenamiento
+  VarImport = 3,
+  models.eval.meth = c('TSS', 'ROC'),
+  SaveObj = TRUE,
+  rescal.all.models = TRUE,
+  do.full.models = FALSE
 )
 
 # -------------------------------
@@ -585,7 +690,7 @@ boxplot(TSS_scores, main="Distribución de TSS por modelo")
 # -------------------------------
 
 Biomod_proyeccion_presente <- BIOMOD_Projection(
-  bm.mod = Biomod_model_presente,
+  modeling.output = Biomod_model_presente,
   new.env = pc_data[, 1:4],  # variables PCA
   proj.name = 'presente',
   selected.models = 'all',
@@ -594,14 +699,13 @@ Biomod_proyeccion_presente <- BIOMOD_Projection(
   build.clamping.mask = FALSE,
   xy = pc_data[, c("centro_x", "centro_y")]
 )
-# Ahora intenta graficar la proyección especificando correctamente las coordenadas
-plot(Biomod_proyeccion_presente, coord = pc_data[, c("centro_x", "centro_y")])
+
 # -------------------------------
 # 5. Proyección para el futuro SPP126
 # -------------------------------
 
 Biomod_proyeccion_futuro_126 <- BIOMOD_Projection(
-  bm.mod = Biomod_model_presente,
+  modeling.output = Biomod_model_presente,
   new.env = pc_futuros_126[, 1:4],
   proj.name = "futuro_126",
   selected.models = "all",
@@ -610,14 +714,12 @@ Biomod_proyeccion_futuro_126 <- BIOMOD_Projection(
   build.clamping.mask = FALSE,
   xy = pc_futuros_126[, c("centro_x", "centro_y")]
 )
-# Ahora intenta graficar la proyección especificando correctamente las coordenadas
-plot(Biomod_proyeccion_futuro_126, coord = pc_futuros_126[, c("centro_x", "centro_y")])
 # -------------------------------
 # 5.1. Proyección para el futuro SPP245
 # -------------------------------
 
 Biomod_proyeccion_futuro_245 <- BIOMOD_Projection(
-  bm.mod = Biomod_model_presente,
+  modeling.output = Biomod_model_presente,
   new.env = pc_futuros_245[, 1:4],
   proj.name = "futuro_245",
   selected.models = "all",
@@ -626,14 +728,12 @@ Biomod_proyeccion_futuro_245 <- BIOMOD_Projection(
   build.clamping.mask = FALSE,
   xy = pc_futuros_245[, c("centro_x", "centro_y")]
 )
-# Ahora intenta graficar la proyección especificando correctamente las coordenadas
-plot(Biomod_proyeccion_futuro_245, coord = pc_futuros_126[, c("centro_x", "centro_y")])
 # -------------------------------
 # 5.2. Proyección para el futuro SPP370
 # -------------------------------
 
 Biomod_proyeccion_futuro_370 <- BIOMOD_Projection(
-  bm.mod = Biomod_model_presente,
+  modeling.output = Biomod_model_presente,
   new.env = pc_futuros_370[, 1:4],
   proj.name = "futuro_370",
   selected.models = "all",
@@ -642,14 +742,12 @@ Biomod_proyeccion_futuro_370 <- BIOMOD_Projection(
   build.clamping.mask = FALSE,
   xy = pc_futuros_370[, c("centro_x", "centro_y")]
 )
-# Ahora intenta graficar la proyección especificando correctamente las coordenadas
-plot(Biomod_proyeccion_futuro_370, coord = pc_futuros_126[, c("centro_x", "centro_y")])
 # -------------------------------
 # 5.3. Proyección para el futuro SPP548
 # -------------------------------
 
 Biomod_proyeccion_futuro_548 <- BIOMOD_Projection(
-  bm.mod = Biomod_model_presente,
+  modeling.output = Biomod_model_presente,
   new.env = pc_futuros_548[, 1:4],
   proj.name = "futuro_548",
   selected.models = "all",
@@ -658,30 +756,38 @@ Biomod_proyeccion_futuro_548 <- BIOMOD_Projection(
   build.clamping.mask = FALSE,
   xy = pc_futuros_548[, c("centro_x", "centro_y")]
 )
-# Ahora intenta graficar la proyección especificando correctamente las coordenadas
-plot(Biomod_proyeccion_futuro_548, coord = pc_futuros_126[, c("centro_x", "centro_y")])
+
 # -------------------------------
 # 6. Creación de modelos en conjunto (ensemble)
 # -------------------------------
 
 myBiomodEnsembleModel <- BIOMOD_EnsembleModeling(
-  bm.mod = Biomod_model_presente,  # Modelos individuales
-  em.by = "all",                            # Hacer el modelo conjunto por todos
-  metric.eval = c("TSS", "ROC"),            # Métricas de evaluación
-  metric.select.thresh = c(0.7, 0.8),  # Umbrales
-  em.algo = c("EMmean", "EMcv", "EMci", "EMmedian", "EMca", "EMwmean"),  # Algoritmos de ensemble
-  prob.ci.alpha = 0.05,                 # Nivel de confianza
-  EMwmean.decay = "proportional"
+  modeling.output = Biomod_model_presente,
+  chosen.models = 'all',
+  em.by = 'all',
+  eval.metric = c('TSS', 'ROC'),
+  eval.metric.quality.threshold = c(0.7, 0.8),  # Tenías una coma mal antes (0,8 -> 0.8)
+  prob.mean = TRUE,
+  prob.cv = TRUE,
+  prob.ci = TRUE,
+  prob.ci.alpha = 0.05,
+  prob.median = TRUE,
+  committee.averaging = TRUE,
+  prob.mean.weight = TRUE,
+  prob.mean.weight.decay = 'proportional'
 )
 
-ensemble_projection <- BIOMOD_EnsembleForecasting(
-  bm.em = myBiomodEnsembleModel,
-  new.env = pc_data[, 1:4],
-  proj.name = "presente_ensemble",
-  xy.new.env = pc_data[, c("centro_x", "centro_y")]
+Biomod_ensemble_presente <- BIOMOD_EnsembleForecasting(
+  EM.output = myBiomodEnsembleModel,
+  projection.output = Biomod_proyeccion_presente,
+  binary.meth = "TSS",
+  compress = "xz",
+  build.clamping.mask = FALSE
 )
 
-plot(ensemble_projection, coord = pc_data[, c("centro_x", "centro_y")])
+# Visualización
+plot(Biomod_ensemble_presente)
+
 # -------------------------------
 # 7. Ensemble Forecasting para el futuro SPP126
 # -------------------------------
@@ -740,10 +846,32 @@ plot(Biomod_ensemble_futuro_245)
 plot(Biomod_ensemble_futuro_370)
 plot(Biomod_ensemble_futuro_548)
 
-summary(Biomod_model_presente)
 
-evaluations <- get_evaluations(Biomod_model_presente)
-print(evaluations)
-
-class(Biomod_model_presente)
 get_evaluations(myBiomodEnsembleModel)
+
+var_importancia <- get_variables_importance(Biomod_model_presente)
+var_importancia
+
+
+# Obtener todas las predicciones 
+all_preds <- get_predictions(Biomod_model_presente)
+
+# Verifica las dimensiones y contenido
+str(all_preds)
+
+par(mfrow = c(3, 3))  # 3x3 gráficos por página
+
+modelos <- dimnames(all_preds)[[2]]
+corridas <- dimnames(all_preds)[[3]]
+obs <- get_formal_data(Biomod_model_presente, "resp.var")
+
+for (mod in modelos) {
+  for (run in corridas) {
+    preds <- all_preds[, mod, run, 1]
+    roc_obj <- roc(obs, preds)
+    plot(roc_obj, main = paste("ROC -", mod, run))
+  }
+}
+
+get_evaluations(myBiomodEnsembleModel)
+
